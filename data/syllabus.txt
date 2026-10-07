@@ -1,0 +1,38 @@
+Subject: Data Structures
+
+Unit 1: Introduction to Data Structures
+- Algorithms
+- Complexity Analysis
+- Arrays
+- Linked Lists
+
+Unit 2: Stacks and Queues
+- Stack
+- Applications of Stack
+- Queue
+- Circular Queue
+
+Unit 3: Trees
+- Tree Terminology
+- Binary Trees
+- Binary Search Trees
+- Tree Traversal
+
+Subject: Machine Learning
+
+Unit 1: Introduction to Machine Learning
+- Machine Learning Basics
+- Supervised Learning
+- Unsupervised Learning
+- Training and Testing Data
+
+Unit 2: Regression
+- Linear Regression
+- Multiple Linear Regression
+- Model Evaluation
+
+Unit 3: Classification
+- Logistic Regression
+- Decision Trees
+- K-Nearest Neighbors
+- Classification Evaluation
