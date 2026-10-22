@@ -2,10 +2,33 @@
 # PERSONALIZED LEARNING PATH RECOMMENDER
 # =========================================================
 
+FOUNDATION_PHRASES = (
+    "introduction",
+    "introduction to",
+    "basics of",
+    "basic concepts",
+    "fundamentals of",
+    "fundamental concepts",
+    "overview of",
+    "preliminaries",
+    "definition of",
+    "algorithm analysis",
+    "complexity analysis",
+    "time complexity",
+    "space complexity",
+    "basic principles",
+    "core concepts",
+)
 
-# =========================================================
-# FOUNDATION TOPIC DETECTION
-# =========================================================
+ADVANCED_PHRASES = (
+    "advanced",
+    "string matching",
+    "convex hull",
+    "network flow",
+    "approximation algorithm",
+    "randomized algorithm",
+    "advanced optimization",
+)
 
 FOUNDATION_WORDS = {
     "introduction",
@@ -14,426 +37,275 @@ FOUNDATION_WORDS = {
     "basics",
     "fundamental",
     "fundamentals",
-    "concept",
-    "concepts",
-    "terminology",
     "overview",
-    "algorithm",
-    "algorithms"
+    "terminology",
+    "definition",
+    "definitions",
+    "preliminaries",
 }
 
 
 def is_foundation_topic(topic):
-    """
-    Identify whether a topic appears to be foundational.
-    """
+    """Return True when a topic appears introductory."""
+    name = str(topic).strip().lower()
 
-    topic_lower = topic.lower()
+    if any(phrase in name for phrase in ADVANCED_PHRASES):
+        return False
 
-    for word in FOUNDATION_WORDS:
+    if any(phrase in name for phrase in FOUNDATION_PHRASES):
+        return True
 
-        if word in topic_lower:
-            return True
+    return any(
+        word in name.split()
+        for word in FOUNDATION_WORDS
+    )
 
-    return False
 
+def is_advanced_topic(topic):
+    """Identify topics that should generally come later."""
+    name = str(topic).strip().lower()
 
-# =========================================================
-# PERSONALIZED LEARNING PATH
-# =========================================================
+    return any(
+        phrase in name
+        for phrase in ADVANCED_PHRASES
+    )
+
 
 def recommend_learning_path(
     topics,
     dependencies,
-    completed_topics
+    completed_topics,
+    selected_course=None,
 ):
     """
-    Generate a personalized learning path.
+    Recommend a learning path for one course.
 
-    The system considers:
-
-    1. Completed topics
-    2. Detected prerequisite relationships
-    3. Syllabus order
-    4. Foundational topics
-
-    The system recommends only topics that are
-    reasonably ready to be studied next.
+    Topics with no detected prerequisites are treated as possible
+    starting points, not as proof that they are beginner topics.
     """
 
     # -----------------------------------------------------
-    # NORMALIZE COMPLETED TOPICS
+    # 1. FILTER TOPICS
     # -----------------------------------------------------
 
-    completed_set = {
-        topic.strip().lower()
-        for topic in completed_topics
+    filtered_topics = []
+
+    for item in topics:
+        topic = str(item.get("topic", "")).strip()
+
+        if not topic:
+            continue
+
+        subject = str(item.get("subject", "")).strip()
+
+        if selected_course and subject != selected_course:
+            continue
+
+        filtered_topics.append(item)
+
+    if not filtered_topics:
+        return []
+
+    topic_names = [
+        str(item["topic"]).strip()
+        for item in filtered_topics
+    ]
+
+    valid_names = set(topic_names)
+
+    topic_order = {
+        topic: index
+        for index, topic in enumerate(topic_names)
     }
 
+    completed_set = {
+        str(topic).strip().casefold()
+        for topic in (completed_topics or [])
+    }
+
+    completed_positions = [
+        topic_order[topic]
+        for topic in topic_names
+        if topic.casefold() in completed_set
+    ]
 
     # -----------------------------------------------------
-    # CREATE PREREQUISITE MAP
+    # 2. BUILD PREREQUISITE MAP
     # -----------------------------------------------------
 
-    prerequisites = {}
+    prerequisites = {
+        topic: []
+        for topic in valid_names
+    }
 
-    for dependency in dependencies:
+    for dependency in dependencies or []:
+        topic = str(dependency.get("topic", "")).strip()
+        prerequisite = str(
+            dependency.get("prerequisite", "")
+        ).strip()
 
-        topic = dependency["topic"]
-        prerequisite = dependency["prerequisite"]
-
-        if topic not in prerequisites:
-
-            prerequisites[topic] = []
-
-        prerequisites[topic].append(
-            dependency
-        )
-
-
-    # -----------------------------------------------------
-    # REMOVE DUPLICATE PREREQUISITES
-    # -----------------------------------------------------
+        if (
+            topic in valid_names
+            and prerequisite in valid_names
+            and topic != prerequisite
+        ):
+            prerequisites[topic].append(prerequisite)
 
     for topic in prerequisites:
-
-        unique = {}
-
-        for dependency in prerequisites[topic]:
-
-            prerequisite = dependency[
-                "prerequisite"
-            ]
-
-            if prerequisite not in unique:
-
-                unique[prerequisite] = dependency
-
         prerequisites[topic] = list(
-            unique.values()
+            dict.fromkeys(prerequisites[topic])
         )
 
-
     # -----------------------------------------------------
-    # CREATE TOPIC ORDER
+    # 3. NO COMPLETED TOPICS: RECOMMEND STARTING TOPICS
     # -----------------------------------------------------
-
-    topic_order = {}
-
-    for index, item in enumerate(topics):
-
-        topic_order[
-            item["topic"]
-        ] = index
-
-
-    # =====================================================
-    # CASE 1 — NOTHING COMPLETED
-    # =====================================================
 
     if not completed_set:
+        candidates = []
 
-        starting_topics = []
+        for topic in topic_names:
+            required = prerequisites[topic]
 
-        for item in topics:
+            # A topic with detected prerequisites should not
+            # normally be offered as a first choice.
+            if required:
+                continue
 
-            topic = item["topic"]
+            position = topic_order[topic]
+            score = 0
 
-            required = prerequisites.get(
-                topic,
-                []
-            )
+            # Prefer topics near the beginning of the course.
+            score -= position * 2
 
-            # ---------------------------------------------
-            # Topic has no detected prerequisite
-            # ---------------------------------------------
+            if is_foundation_topic(topic):
+                score += 100
 
-            if not required:
+            if is_advanced_topic(topic):
+                score -= 100
 
-                score = 0
+            candidates.append({
+                "topic": topic,
+                "score": score,
+                "position": position,
+                "reason": (
+                    "This topic has no detected prerequisite "
+                    "in the selected course and appears suitable "
+                    "as a possible starting point. Confirm the "
+                    "course syllabus for the intended order."
+                ),
+            })
 
-                # Earlier syllabus topics are preferred
-                position = topic_order.get(
-                    topic,
-                    9999
-                )
+        # If dependency inference leaves no starting nodes,
+        # fall back to early course topics and flag the limitation.
+        if not candidates:
+            for topic in topic_names:
+                position = topic_order[topic]
+                score = -position * 2
 
-                if position <= 5:
-
-                    score += 3
-
-                elif position <= 10:
-
-                    score += 2
-
-                else:
-
-                    score += 1
-
-
-                # Foundation topics get extra priority
                 if is_foundation_topic(topic):
+                    score += 100
 
-                    score += 3
+                if is_advanced_topic(topic):
+                    score -= 100
 
-
-                starting_topics.append({
-
+                candidates.append({
                     "topic": topic,
-
                     "score": score,
-
-                    "reason":
-                        "This topic has no detected "
-                        "prerequisite and is suitable "
-                        "as an initial learning topic."
-
+                    "position": position,
+                    "reason": (
+                        "Suggested from the early course topics "
+                        "because the inferred dependency graph "
+                        "did not identify a clear starting point. "
+                        "Check the syllabus before studying."
+                    ),
                 })
 
-
-        # -------------------------------------------------
-        # Sort starting topics
-        # -------------------------------------------------
-
-        starting_topics.sort(
-            key=lambda x: (
-                -x["score"],
-                topic_order.get(
-                    x["topic"],
-                    9999
-                )
+        candidates.sort(
+            key=lambda item: (
+                -item["score"],
+                item["position"],
             )
         )
-
-
-        # -------------------------------------------------
-        # Return only a small number of starting topics
-        # -------------------------------------------------
 
         return [
             {
                 "topic": item["topic"],
-                "reason": item["reason"]
+                "reason": item["reason"],
             }
-            for item in starting_topics[:5]
+            for item in candidates[:5]
         ]
 
-
-    # =====================================================
-    # CASE 2 — SOME TOPICS COMPLETED
-    # =====================================================
+    # -----------------------------------------------------
+    # 4. SOME TOPICS COMPLETED: FIND NEXT TOPICS
+    # -----------------------------------------------------
 
     recommendations = []
 
+    latest_position = max(completed_positions, default=-1)
 
-    for item in topics:
-
-        topic = item["topic"]
-
-        topic_key = topic.strip().lower()
-
-
-        # -------------------------------------------------
-        # Skip completed topics
-        # -------------------------------------------------
-
-        if topic_key in completed_set:
-
+    for topic in topic_names:
+        if topic.casefold() in completed_set:
             continue
 
+        required = prerequisites[topic]
 
-        required = prerequisites.get(
-            topic,
-            []
-        )
+        incomplete = [
+            prerequisite
+            for prerequisite in required
+            if prerequisite.casefold() not in completed_set
+        ]
 
-
-        # -------------------------------------------------
-        # NO DETECTED PREREQUISITES
-        # -------------------------------------------------
-
-        if not required:
-
-            # Find whether this topic is close to
-            # the learner's current syllabus position.
-
-            topic_position = topic_order.get(
-                topic,
-                9999
-            )
-
-            completed_positions = []
-
-            for completed in topics:
-
-                if (
-                    completed["topic"]
-                    .strip()
-                    .lower()
-                    in completed_set
-                ):
-
-                    completed_positions.append(
-                        topic_order.get(
-                            completed["topic"],
-                            9999
-                        )
-                    )
-
-
-            if completed_positions:
-
-                latest_completed_position = max(
-                    completed_positions
-                )
-
-                # Recommend independent topics that
-                # occur shortly after completed topics.
-                if (
-                    topic_position
-                    <= latest_completed_position + 5
-                ):
-
-                    recommendations.append({
-
-                        "topic": topic,
-
-                        "score": 2,
-
-                        "reason":
-                            "This topic has no detected "
-                            "prerequisite and is close to "
-                            "your current learning position."
-
-                    })
-
+        if required and incomplete:
             continue
 
+        position = topic_order[topic]
+        score = 0
 
-        # -------------------------------------------------
-        # CHECK PREREQUISITES
-        # -------------------------------------------------
+        if is_foundation_topic(topic):
+            score += 10
 
-        completed_required = []
-        incomplete_required = []
+        if is_advanced_topic(topic):
+            score -= 10
 
+        if position >= latest_position:
+            score += 5
 
-        for dependency in required:
+        if required:
+            score += 10
+            reason = (
+                "All detected prerequisite topics have been "
+                "marked completed, so this topic may be ready "
+                "to study next."
+            )
+        else:
+            # Only recommend independent topics near the
+            # learner's current position.
+            if position > latest_position + 3:
+                continue
 
-            prerequisite = dependency[
-                "prerequisite"
-            ]
-
-            prerequisite_key = (
-                prerequisite.strip().lower()
+            reason = (
+                "No prerequisite was detected for this topic, "
+                "and it is near your current course position."
             )
 
-
-            if (
-                prerequisite_key
-                in completed_set
-            ):
-
-                completed_required.append(
-                    dependency
-                )
-
-            else:
-
-                incomplete_required.append(
-                    dependency
-                )
-
-
-        # -------------------------------------------------
-        # ALL PREREQUISITES COMPLETED
-        # -------------------------------------------------
-
-        if (
-            len(incomplete_required) == 0
-            and len(completed_required) > 0
-        ):
-
-            prerequisite_names = [
-
-                dependency["prerequisite"]
-
-                for dependency
-                in completed_required
-
-            ]
-
-
-            # Calculate recommendation score
-
-            score = 5
-
-            if is_foundation_topic(topic):
-
-                score += 1
-
-
-            recommendations.append({
-
-                "topic": topic,
-
-                "score": score,
-
-                "reason":
-                    "You have completed all detected "
-                    "prerequisites: "
-                    + ", ".join(
-                        prerequisite_names
-                    )
-                    + ". This topic is ready "
-                    "to be studied next."
-
-            })
-
-
-    # =====================================================
-    # SORT RECOMMENDATIONS
-    # =====================================================
+        recommendations.append({
+            "topic": topic,
+            "score": score,
+            "position": position,
+            "reason": reason,
+        })
 
     recommendations.sort(
-        key=lambda x: (
-            -x["score"],
-            topic_order.get(
-                x["topic"],
-                9999
-            )
+        key=lambda item: (
+            -item["score"],
+            item["position"],
         )
     )
 
-
-    # =====================================================
-    # REMOVE DUPLICATES
-    # =====================================================
-
-    unique_recommendations = []
-
-    seen = set()
-
-
-    for recommendation in recommendations:
-
-        topic = recommendation["topic"]
-
-        if topic not in seen:
-
-            unique_recommendations.append(
-                {
-                    "topic": topic,
-                    "reason":
-                        recommendation["reason"]
-                }
-            )
-
-            seen.add(topic)
-
-
-    # -----------------------------------------------------
-    # Return top recommendations
-    # -----------------------------------------------------
-
-    return unique_recommendations[:5]
+    return [
+        {
+            "topic": item["topic"],
+            "reason": item["reason"],
+        }
+        for item in recommendations[:5]
+    ]
